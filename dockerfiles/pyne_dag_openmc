@@ -1,0 +1,197 @@
+FROM debian:bookworm-slim
+
+# modified from OpenMC's dockerfile https://github.com/openmc-dev/openmc/blob/develop/Dockerfile
+# Install and update dependencies from Debian package manager
+RUN apt-get update -y && \
+    apt-get upgrade -y && \
+    apt-get install -y \
+        python3-pip \
+        python-is-python3 \
+        wget \
+        git \ 
+        build-essential \
+        cmake \
+        mpich \
+        libmpich-dev \
+        libpng-dev \
+        liblzma-dev \
+        make \
+        build-essential \
+        libssl-dev \
+        zlib1g-dev \
+        libbz2-dev \
+        libreadline-dev \
+        libsqlite3-dev \
+        wget \
+        ca-certificates \
+        curl \
+        llvm \ 
+        libncurses5-dev \
+        xz-utils \
+        tk-dev \
+        libxml2-dev \
+        libxmlsec1-dev \
+        libffi-dev \
+        liblzma-dev \
+        mecab-ipadic-utf8 \
+        git \
+        libeigen3-dev \
+        libnetcdf-dev \
+        libtbb-dev \
+        libglfw3-dev \
+        libblas-dev \
+        liblapack-dev \
+        wget \
+        nano
+
+ENV HOME=/root
+
+ENV PYTHON_VERSION 3.11.9
+
+# Set-up necessary Env vars for PyEnv
+ENV PYENV_ROOT /root/.pyenv
+ENV PATH $PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH
+
+# Install pyenv & python dependencies.
+RUN set -ex \
+    && curl https://pyenv.run | bash \
+    && pyenv update \
+    && pyenv install $PYTHON_VERSION \
+    && pyenv global $PYTHON_VERSION \
+    && pyenv rehash \
+    && pip install --upgrade pip \
+    && pip install packaging \
+    progress pyyaml pytest openmc-plasma-source vtk tables
+
+ARG compile_cores=18
+
+# HDF5 stuff
+ENV HDF5_BUILD_DIR=/root/build/hdf5
+ENV HDF5_INSTALL_DIR=/opt/hdf5
+
+# Embree variables
+ENV EMBREE_TAG='v4.3.1'
+ENV EMBREE_REPO='https://github.com/embree/embree'
+ENV EMBREE_INSTALL_DIR=$HOME/EMBREE/
+
+# MOAB variables
+ENV MOAB_TAG='5.3.0'
+ENV MOAB_REPO='https://bitbucket.org/fathomteam/moab/'
+
+# Double-Down variables
+ENV DD_TAG='v1.1.0'
+ENV DD_REPO='https://github.com/pshriwise/double-down'
+ENV DD_INSTALL_DIR=$HOME/Double_down
+
+# DAGMC variables
+ENV DAGMC_BRANCH='v3.2.3'
+ENV DAGMC_REPO='https://github.com/svalinn/DAGMC'
+ENV DAGMC_INSTALL_DIR=$HOME/DAGMC/
+
+# Setup environment variables for Docker image
+ENV LD_LIBRARY_PATH=${DAGMC_INSTALL_DIR}/lib \
+    OPENMC_ENDF_DATA=/root/endf-b-vii.1 \
+    DEBIAN_FRONTEND=noninteractive
+
+# HDF5
+RUN mkdir -p ${HDF5_INSTALL_DIR}/temp \
+	&& wget https://hdf-wordpress-1.s3.amazonaws.com/wp-content/uploads/manual/HDF5/HDF5_1_14_3/src/hdf5-1.14.3.tar.gz -O ${HDF5_INSTALL_DIR}/temp/hdf5-1.14.3.tar.gz  \
+	&& cd ${HDF5_INSTALL_DIR}/temp \
+	&& tar -xvf hdf5-1.14.3.tar.gz \
+	&& cd hdf5-1.14.3 \
+	&& mkdir build \
+	&& cd build && \
+	../configure --prefix=${HDF5_INSTALL_DIR} \
+		 --enable-optimization=high --enable-shared \
+		 --enable-hl \
+		 --enable-build-mode=production \
+	&& make -j${compile_cores} \
+	&& make install \
+	&& rm -rf ${HDF5_INSTALL_DIR}/temp
+ENV HDF5_ROOT=${HDF5_INSTALL_DIR}
+
+# Install addition packages required for DAGMC
+RUN pip install --upgrade "numpy<2.0" "cython<3.0" \
+    # Clone and install EMBREE
+    && mkdir -p $HOME/EMBREE && cd $HOME/EMBREE \
+    && git clone --single-branch -b ${EMBREE_TAG} --depth 1 ${EMBREE_REPO} \
+    && mkdir build && cd build \
+    && cmake ../embree \
+                -DCMAKE_INSTALL_PREFIX=${EMBREE_INSTALL_DIR} \
+                -DEMBREE_MAX_ISA=NONE \
+                -DEMBREE_ISA_SSE42=ON \
+                -DEMBREE_ISPC_SUPPORT=OFF \
+    && make 2>/dev/null -j${compile_cores} install \
+    && rm -rf ${EMBREE_INSTALL_DIR}/build ${EMBREE_INSTALL_DIR}/embree 
+# Clone and install MOAB
+RUN mkdir -p $HOME/MOAB && cd $HOME/MOAB \
+    && git clone  --single-branch -b ${MOAB_TAG} --depth 1 ${MOAB_REPO} \
+    && mkdir build && cd build \
+    && cmake ../moab -DCMAKE_BUILD_TYPE=Release \
+                    -DENABLE_HDF5=ON \
+                    -DHDF5_ROOT=${HDF5_INSTALL_DIR} \
+                    -DBUILD_SHARED_LIBS=OFF \
+                    -DENABLE_FORTRAN=OFF \
+                    -DENABLE_BLASLAPACK=OFF \
+    && make 2>/dev/null -j${compile_cores} install \
+    && cmake ../moab \
+                -DENABLE_PYMOAB=ON \
+                -DBUILD_SHARED_LIBS=ON \
+    && make 2>/dev/null -j${compile_cores} install \
+    && cd pymoab && bash install.sh \
+    && python setup.py install \
+    && python -c "import pymoab" \
+    && rm -rf $HOME/MOAB
+
+# Clone and install Double-Down
+RUN mkdir -p $HOME/Double_down && cd $HOME/Double_down \
+    && git clone --single-branch -b ${DD_TAG} --depth 1 ${DD_REPO} \
+    && mkdir build && cd build \
+    && cmake ../double-down -DCMAKE_INSTALL_PREFIX=${DD_INSTALL_DIR} \
+                            -DMOAB_DIR=/usr/local \
+                            -DEMBREE_DIR=${EMBREE_INSTALL_DIR} \
+    && make 2>/dev/null -j${compile_cores} install \
+    && rm -rf ${DD_INSTALL_DIR}/build ${DD_INSTALL_DIR}/double-down
+# Clone and install DAGMC
+RUN mkdir -p $HOME/DAGMC && cd $HOME/DAGMC \
+    && git clone --single-branch -b ${DAGMC_BRANCH} --depth 1 ${DAGMC_REPO} \
+    && mkdir build && cd build \
+    && cmake ../DAGMC -DBUILD_TALLY=ON \
+                    -DCMAKE_INSTALL_PREFIX=${DAGMC_INSTALL_DIR} \
+                    -DMOAB_DIR=/usr/local \
+                    -DDOUBLE_DOWN=ON \
+                    -DDOUBLE_DOWN_DIR=${DD_INSTALL_DIR} \
+                    -DCMAKE_PREFIX_PATH=${DD_INSTALL_DIR}/lib \
+                    -DBUILD_STATIC_LIBS=OFF \
+    && make 2>/dev/null -j${compile_cores} install \
+    && rm -rf ${DAGMC_INSTALL_DIR}/DAGMC ${DAGMC_INSTALL_DIR}/build
+
+ARG openmc_branch=develop
+ENV OPENMC_REPO='https://github.com/openmc-dev/openmc'
+
+ENV DAGMC_INSTALL_DIR=$HOME/DAGMC/
+
+# clone and install openmc
+RUN mkdir -p ${HOME}/OpenMC && cd ${HOME}/OpenMC \
+    && git clone --shallow-submodules --recurse-submodules --single-branch -b ${openmc_branch} --depth=1 ${OPENMC_REPO} \
+    && mkdir build && cd build &&\
+        cmake ../openmc \
+            -DCMAKE_CXX_COMPILER=mpicxx \
+            -DOPENMC_USE_MPI=on \
+            -DHDF5_PREFER_PARALLEL=on \
+            -DOPENMC_USE_DAGMC=ON \
+            -DCMAKE_PREFIX_PATH=${DAGMC_INSTALL_DIR} \
+    && make 2>/dev/null -j${compile_cores} install \
+    && cd ../openmc && pip install .[test,depletion-mpi] \
+    && python -c "import openmc"
+
+WORKDIR $HOME/opt
+RUN git clone -b 0.7.8 https://github.com/pyne/pyne.git
+RUN cd $HOME/opt/pyne \
+    && python setup.py install --user \
+                                --clean -j${compile_cores}
+RUN ./pyne/scripts/nuc_data_make
+                                
+RUN git clone https://github.com/svalinn/fusion-material-db.git
+ENV PYTHONPATH=$PYTHONPATH:$HOME/opt/fusion-material-db/material-db-tools
+
