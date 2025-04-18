@@ -7,7 +7,7 @@ ENV HOME=/root
 # Embree variables
 ENV EMBREE_TAG='v4.3.1'
 ENV EMBREE_REPO='https://github.com/embree/embree'
-ENV EMBREE_INSTALL_DIR=$HOME/EMBREE/
+ENV EMBREE_INSTALL_DIR=$HOME/EMBREE
 
 # MOAB variables
 ENV MOAB_TAG='5.5.1'
@@ -21,11 +21,12 @@ ENV DD_INSTALL_DIR=$HOME/Double_down
 # DAGMC variables
 ENV DAGMC_BRANCH='v3.2.4'
 ENV DAGMC_REPO='https://github.com/svalinn/DAGMC'
-ENV DAGMC_INSTALL_DIR=$HOME/DAGMC/
+ENV DAGMC_INSTALL_DIR=$HOME/DAGMC
 
 # OpenMC variables
 ENV OPENMC_BRANCH="develop"
 ENV OPENMC_REPO='https://github.com/openmc-dev/openmc'
+ENV OPENMC_INSTALL_DIR=$HOME/OpenMC
 
 # PyNE variables
 ENV PYNE_VERSION="0.7.8"
@@ -114,9 +115,10 @@ RUN mkdir -p $HOME/DAGMC && cd $HOME/DAGMC \
     -DBUILD_STATIC_LIBS=OFF \
     && make 2>/dev/null -j${cores} install \
     && rm -rf ${DAGMC_INSTALL_DIR}/DAGMC ${DAGMC_INSTALL_DIR}/build
+ENV PATH=$PATH:${DAGMC_INSTALL_DIR}/bin
 
-# clone and install openmc
-RUN mkdir -p ${HOME}/OpenMC && cd ${HOME}/OpenMC \
+# Clone and install OpenMC
+RUN mkdir -p ${OPENMC_INSTALL_DIR} && cd ${OPENMC_INSTALL_DIR} \
     && git clone --shallow-submodules --recurse-submodules --single-branch -b ${OPENMC_BRANCH} --depth=1 ${OPENMC_REPO} \
     && mkdir build && cd build \
     && cmake ../openmc \
@@ -140,3 +142,5 @@ RUN git clone https://github.com/svalinn/fusion-material-db.git
 ENV PYTHONPATH=$PYTHONPATH:$HOME/opt/fusion-material-db/material-db-tools
 
 WORKDIR /
+
+
