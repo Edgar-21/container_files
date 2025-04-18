@@ -1,6 +1,6 @@
 FROM debian:bookworm-slim
 
-ENV cores=18
+ARG cores=1
 
 ENV HOME=/root
 
